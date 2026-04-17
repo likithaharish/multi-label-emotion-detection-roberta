@@ -5,8 +5,9 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix, ConfusionMatrixDisplay
 from transformers import RobertaTokenizer, RobertaForSequenceClassification, Trainer, TrainingArguments
 
 # ==============================
@@ -25,6 +26,19 @@ df = df.drop(columns=['id','author','subreddit','link_id','parent_id','created_u
 
 label_cols = df.columns.drop(['text'])
 labels = df[label_cols].apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
+
+# ==============================
+# 📊 EMOTION DISTRIBUTION GRAPH
+# ==============================
+emotion_counts = labels.sum().sort_values(ascending=False)
+
+plt.figure(figsize=(10,5))
+plt.bar(emotion_counts.index[:10], emotion_counts.values[:10])
+plt.xticks(rotation=45)
+plt.title("Emotion Distribution in Dataset")
+plt.xlabel("Emotions")
+plt.ylabel("Count")
+plt.show()
 
 # ==============================
 # 4. SPLIT
@@ -144,6 +158,26 @@ print("Training Started...")
 trainer.train()
 
 # ==============================
+# 📉 LOSS CURVE GRAPH
+# ==============================
+logs = trainer.state.log_history
+
+train_loss = []
+steps = []
+
+for i, log in enumerate(logs):
+    if "loss" in log:
+        train_loss.append(log["loss"])
+        steps.append(i)
+
+plt.figure()
+plt.plot(steps, train_loss)
+plt.xlabel("Steps")
+plt.ylabel("Loss")
+plt.title("Training Loss Curve")
+plt.show()
+
+# ==============================
 # 13. THRESHOLD TUNING
 # ==============================
 print("\nFinding best threshold...")
@@ -167,6 +201,21 @@ for t in np.arange(0.2, 0.6, 0.02):
 
 print(f"\nBest Threshold: {best_threshold}")
 print(f"Best F1 Score: {best_f1}")
+
+# ==============================
+# 📊 CONFUSION MATRIX GRAPH
+# ==============================
+final_preds = (probs > best_threshold).int().numpy()
+
+y_true = labels.argmax(axis=1)
+y_pred = final_preds.argmax(axis=1)
+
+cm = confusion_matrix(y_true, y_pred)
+
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+disp.plot()
+plt.title("Confusion Matrix")
+plt.show()
 
 # ==============================
 # 14. SAVE MODEL
