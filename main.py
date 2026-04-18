@@ -6,8 +6,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
+
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import (
+    f1_score, precision_score, recall_score,
+    confusion_matrix, ConfusionMatrixDisplay,
+    multilabel_confusion_matrix
+)
+
 from transformers import RobertaTokenizer, RobertaForSequenceClassification, Trainer, TrainingArguments
 
 # ==============================
@@ -17,18 +23,21 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 print("Using device:", device)
 
 # ==============================
-# 3. LOAD DATA (80K)
+# 3. LOAD DATA
 # ==============================
 df = pd.read_csv("go_emotions_dataset.csv")
 df = df.sample(n=80000, random_state=42).reset_index(drop=True)
 
-df = df.drop(columns=['id','author','subreddit','link_id','parent_id','created_utc','rater_id'], errors='ignore')
+df = df.drop(columns=[
+    'id','author','subreddit','link_id',
+    'parent_id','created_utc','rater_id'
+], errors='ignore')
 
 label_cols = df.columns.drop(['text'])
 labels = df[label_cols].apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
 
 # ==============================
-# 📊 EMOTION DISTRIBUTION GRAPH
+# 📊 1. EMOTION DISTRIBUTION
 # ==============================
 emotion_counts = labels.sum().sort_values(ascending=False)
 
@@ -48,7 +57,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # ==============================
-# 5. TOKENIZER (RoBERTa)
+# 5. TOKENIZER
 # ==============================
 tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
 
@@ -84,7 +93,7 @@ train_dataset = EmotionDataset(train_encodings, y_train)
 test_dataset = EmotionDataset(test_encodings, y_test)
 
 # ==============================
-# 7. MODEL (RoBERTa)
+# 7. MODEL
 # ==============================
 model = RobertaForSequenceClassification.from_pretrained(
     'roberta-base',
@@ -95,7 +104,7 @@ model = RobertaForSequenceClassification.from_pretrained(
 model.to(device)
 
 # ==============================
-# 8. CUSTOM TRAINER (BCE LOSS)
+# 8. CUSTOM TRAINER
 # ==============================
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -109,7 +118,7 @@ class CustomTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 # ==============================
-# 9. TRAINING ARGUMENTS
+# 9. TRAINING ARGS
 # ==============================
 training_args = TrainingArguments(
     output_dir="./results",
@@ -158,23 +167,30 @@ print("Training Started...")
 trainer.train()
 
 # ==============================
-# 📉 LOSS CURVE GRAPH
+# 📉 2. LOSS CURVE 
 # ==============================
 logs = trainer.state.log_history
 
 train_loss = []
-steps = []
+eval_loss = []
 
-for i, log in enumerate(logs):
+for log in logs:
     if "loss" in log:
         train_loss.append(log["loss"])
-        steps.append(i)
+    if "eval_loss" in log:
+        eval_loss.append(log["eval_loss"])
 
 plt.figure()
-plt.plot(steps, train_loss)
+
+plt.plot(range(len(train_loss)), train_loss, label="Training Loss")
+
+if len(eval_loss) > 0:
+    plt.plot(range(len(eval_loss)), eval_loss, label="Validation Loss")
+
 plt.xlabel("Steps")
 plt.ylabel("Loss")
-plt.title("Training Loss Curve")
+plt.title("Training vs Validation Loss Curve")
+plt.legend()
 plt.show()
 
 # ==============================
@@ -203,18 +219,25 @@ print(f"\nBest Threshold: {best_threshold}")
 print(f"Best F1 Score: {best_f1}")
 
 # ==============================
-# 📊 CONFUSION MATRIX GRAPH
+# 📊 3. MULTI-LABEL CONFUSION MATRIX 
 # ==============================
 final_preds = (probs > best_threshold).int().numpy()
 
-y_true = labels.argmax(axis=1)
-y_pred = final_preds.argmax(axis=1)
+y_true = labels.astype(int).values
+y_pred = final_preds
 
-cm = confusion_matrix(y_true, y_pred)
+ml_cm = multilabel_confusion_matrix(y_true, y_pred)
 
-disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-disp.plot()
-plt.title("Confusion Matrix")
+fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+
+for i in range(min(4, len(ml_cm))):
+    disp = ConfusionMatrixDisplay(ml_cm[i])
+    row = i // 2
+    col = i % 2
+    disp.plot(ax=axes[row][col], colorbar=False)
+    axes[row][col].set_title(f"Class {i}")
+
+plt.tight_layout()
 plt.show()
 
 # ==============================
