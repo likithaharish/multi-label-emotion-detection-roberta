@@ -83,7 +83,7 @@ I feel happy but also nervous
 Output:
 
 ```
-{'joy': 0.91, 'nervousness': 0.82}
+{ joy: 0.61 }
 ```
 
 ---
